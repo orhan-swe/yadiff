@@ -16,9 +16,14 @@ import {
     formatStatusDetails,
     getLargeDiffLabel,
 } from './format';
+import { loadPreferences, savePreferences } from './preferences';
 import { isFileReviewTarget } from './reviews';
 import type { DiffResponse, DiffStyle, DraftReview, LoadState, Overflow, Review, SavedReview } from './types';
 import { increment, modulo } from './utils';
+
+function defaultDiffStyle(): DiffStyle {
+    return window.matchMedia('(max-width: 800px)').matches ? 'unified' : 'split';
+}
 
 function useAppState() {
     const [loadState, setLoadState] = useState<LoadState>('loading');
@@ -28,10 +33,8 @@ function useAppState() {
     const [response, setResponse] = useState<DiffResponse | null>(null);
     const [patch, setPatch] = useState('');
     const [loadedPatchBytes, setLoadedPatchBytes] = useState<number | undefined>(undefined);
-    const [diffStyle, setDiffStyle] = useState<DiffStyle>(() =>
-        window.matchMedia('(max-width: 800px)').matches ? 'unified' : 'split'
-    );
-    const [overflow, setOverflow] = useState<Overflow>('scroll');
+    const [diffStyle, setDiffStyleRaw] = useState<DiffStyle>(() => loadPreferences().diffStyle ?? defaultDiffStyle());
+    const [overflow, setOverflowRaw] = useState<Overflow>(() => loadPreferences().overflow ?? 'scroll');
     const [showBackgrounds, setShowBackgrounds] = useState(true);
     const [lineNumbers, setLineNumbers] = useState(true);
     const [collapsedIds, setCollapsedIds] = useState<Set<ProjectedFileIdentity>>(() => new Set());
@@ -42,6 +45,20 @@ function useAppState() {
     const [treeViewHidden, setTreeViewHidden] = useState(false);
     const [activeCommitId, setActiveCommitId] = useState<string | null>(null);
     const [commitPatch, setCommitPatch] = useState<string | null>(null);
+    const setDiffStyle: typeof setDiffStyleRaw = useCallback((next) => {
+        setDiffStyleRaw((previous) => {
+            const value = typeof next === 'function' ? next(previous) : next;
+            savePreferences({ diffStyle: value });
+            return value;
+        });
+    }, []);
+    const setOverflow: typeof setOverflowRaw = useCallback((next) => {
+        setOverflowRaw((previous) => {
+            const value = typeof next === 'function' ? next(previous) : next;
+            savePreferences({ overflow: value });
+            return value;
+        });
+    }, []);
 
     return {
         activeCommitId,

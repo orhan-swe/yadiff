@@ -1,24 +1,16 @@
 import { createContext, use, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { loadPreferences, savePreferences } from './preferences';
+
 export type ThemeMode = 'light' | 'dark' | 'auto';
 export type ResolvedTheme = 'light' | 'dark';
-
-const STORAGE_KEY = 'yadiff:theme-mode';
 
 function getSystemTheme(): ResolvedTheme {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 function loadPersistedMode(): ThemeMode {
-    try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored === 'light' || stored === 'dark' || stored === 'auto') {
-            return stored;
-        }
-    } catch {
-        // localStorage unavailable
-    }
-    return 'auto';
+    return loadPreferences().themeMode ?? 'auto';
 }
 
 export function useTheme() {
@@ -41,18 +33,14 @@ export function useTheme() {
     const cycleTheme = useCallback(() => {
         setModeRaw(prev => {
             const next: ThemeMode = prev === 'auto' ? 'light' : prev === 'light' ? 'dark' : 'auto';
-            try { localStorage.setItem(STORAGE_KEY, next); } catch {}
+            savePreferences({ themeMode: next });
             return next;
         });
     }, []);
 
     const setMode = useCallback((next: ThemeMode) => {
         setModeRaw(next);
-        try {
-            localStorage.setItem(STORAGE_KEY, next);
-        } catch {
-            // localStorage unavailable
-        }
+        savePreferences({ themeMode: next });
     }, []);
 
     return useMemo(() => ({
