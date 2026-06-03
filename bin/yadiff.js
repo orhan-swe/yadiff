@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
@@ -478,12 +478,29 @@ function listenWithFallback(server, preferredPort, host, portExplicit, verbose) 
 }
 
 function readVersion() {
+  let version = 'unknown';
   try {
     const pkg = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf8'));
-    return pkg.version ?? 'unknown';
+    version = pkg.version ?? 'unknown';
   } catch {
-    return 'unknown';
+    return version;
   }
+
+  const gitHash = readGitCommitHash();
+  if (gitHash == null) return version;
+
+  return version.replace(/-dev(?:\.\d+)?$/, `-dev-${gitHash}`);
+}
+
+function readGitCommitHash() {
+  const result = spawnSync('git', ['-C', projectRoot, 'rev-parse', '--short=8', 'HEAD'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  if (result.status !== 0) return null;
+
+  const hash = result.stdout.trim();
+  return hash === '' ? null : hash;
 }
 
 function formatSource(source) {

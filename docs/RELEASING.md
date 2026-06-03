@@ -4,7 +4,7 @@ This project follows the standard npm prerelease convention.
 
 - Between releases, `package.json` `version` always ends in `-dev.N` (e.g. `0.0.3-dev.0`).
 - A release is a single commit that drops the `-dev.N` suffix, publishes to npm, then bumps to the next `-dev.0`.
-- `--version` reads straight from `package.json`, so whatever is installed reports its real version with no heuristics.
+- `--version` reads from `package.json`; when the installed CLI lives inside a git checkout, dev versions include the current commit hash (e.g. `0.0.3-dev-ec6af276`).
 
 ## Versioning model
 
@@ -60,7 +60,7 @@ Verify:
 
 ```bash
 yadiff --version
-# 0.0.3-dev.0     <- the -dev.N suffix tells you it's an unreleased build
+# 0.0.3-dev-ec6af276     <- the -dev marker tells you it's unreleased; the hash identifies the checkout
 which yadiff      # symlink into your npm global prefix, target inside this repo
 ```
 
