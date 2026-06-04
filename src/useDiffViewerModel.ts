@@ -1,3 +1,4 @@
+import type { ParsedPatch } from '@pierre/diffs';
 import type { CodeViewHandle } from '@pierre/diffs/react';
 import { useFileTree, useFileTreeSearch } from '@pierre/trees/react';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
@@ -7,7 +8,7 @@ import {
     parseDiffPatch,
     type ProjectedFileIdentity,
 } from './diffProjection';
-import { fetchCommitPatchText, fetchDiffMetadata, fetchPatchText } from './diffClient';
+import { fetchCommitPatchText, fetchDiffMetadata, fetchHydratedDiff, fetchPatchText } from './diffClient';
 import {
     byteLength,
     formatBytes,
@@ -163,6 +164,7 @@ export function useDiffViewerModel() {
         stickyFolders: true,
     });
     const treeSearch = useFileTreeSearch(treeModel);
+    const [hydratedDiff, setHydratedDiff] = useState<{ key: string; patches: ParsedPatch[] } | null>(null);
 
     useEffect(() => {
         const session = new EventSource('/api/session');
@@ -255,7 +257,32 @@ export function useDiffViewerModel() {
 
     const activePatch = activeCommitId != null ? (commitPatch ?? '') : patch;
     const diffKey = response == null ? 'empty' : activeCommitId ?? response.target;
-    const parsedPatches = useMemo(() => parseDiffPatch(activePatch, diffKey), [activePatch, diffKey]);
+
+    useEffect(() => {
+        if (response?.source === 'github' || loadState !== 'ready' || activePatch === '' || (activeCommitId != null && commitPatch == null)) {
+            setHydratedDiff(null);
+            return;
+        }
+
+        let cancelled = false;
+        setHydratedDiff(null);
+        void fetchHydratedDiff(activeCommitId).then((hydrated) => {
+            if (cancelled || hydrated.hydratedFiles === 0) {
+                return;
+            }
+            setHydratedDiff({ key: diffKey, patches: hydrated.patches });
+        }, () => {
+            // Keep the patch-only diff if full file hydration is unavailable.
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeCommitId, activePatch, commitPatch, diffKey, loadState, response?.source]);
+
+    const parsedPatches = useMemo(() => (
+        hydratedDiff?.key === diffKey ? hydratedDiff.patches : parseDiffPatch(activePatch, diffKey)
+    ), [activePatch, diffKey, hydratedDiff]);
     const renderedLineReviews = useMemo(() => reviews.filter((review) => !isFileReviewTarget(review.target)), [reviews]);
     const renderedLineDraftReview = draftReview != null && !isFileReviewTarget(draftReview.target) ? draftReview : null;
     const parsed = useMemo(() => createDiffProjection<Review>({

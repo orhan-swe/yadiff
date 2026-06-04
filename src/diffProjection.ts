@@ -121,7 +121,7 @@ export function createDiffProjection<TReview extends DiffProjectionReview>({
         fileDiff,
         annotations,
         collapsed,
-        version: getItemVersion(collapsed, annotations),
+        version: getItemVersion(fileDiff, collapsed, annotations),
       } satisfies CodeViewDiffItem<TReview>);
     }
   }
@@ -197,10 +197,15 @@ function reviewMatchesFile(review: DiffProjectionReview, file: ProjectedFile): b
 }
 
 function getItemVersion<TReview extends DiffProjectionReview>(
+  fileDiff: FileDiffMetadata,
   isCollapsed: boolean,
   annotations: readonly DiffLineAnnotation<TReview>[]
 ): number {
   let hash = isCollapsed ? 17 : 31;
+  hash = hashString(hash, fileDiff.cacheKey ?? '');
+  hash = hashString(hash, fileDiff.isPartial ? 'partial' : 'full');
+  hash = hashNumber(hash, fileDiff.additionLines.length);
+  hash = hashNumber(hash, fileDiff.deletionLines.length);
   for (const annotation of annotations) {
     const metadata = annotation.metadata;
     hash = hashNumber(hash, annotation.lineNumber);

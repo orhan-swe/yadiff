@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
+import { parsePatchFiles, processFile } from '@pierre/diffs';
 
 import { createTarget } from '../lib/target/index.js';
 
@@ -293,6 +294,7 @@ async function runServer(args) {
   const repositoryName = target.repositoryName ?? target.repoRoot.split('/').filter(Boolean).at(-1) ?? target.repoRoot;
 
   const app = express();
+  const hydratedDiffCache = new Map();
   const backgroundServer = isBackgroundServerProcess();
   let activeBrowserSessions = 0;
   let idleShutdownTimer = null;
@@ -411,6 +413,26 @@ async function runServer(args) {
     }
   });
 
+  app.get('/api/hydrated-diff', async (req, res) => {
+    try {
+      const commitId = typeof req.query.commitId === 'string' ? req.query.commitId : null;
+      const viewKey = commitId == null ? 'combined' : `commit:${commitId}`;
+      const patch = commitId == null ? await target.getPatch() : await target.getCommitPatch(commitId);
+      const cacheKey = `${viewKey}:${hashString(patch)}`;
+      const cached = hydratedDiffCache.get(cacheKey);
+      if (cached != null) {
+        res.json(cached);
+        return;
+      }
+
+      const hydrated = await createHydratedDiffResponse(target, patch, cacheKey);
+      hydratedDiffCache.set(cacheKey, hydrated);
+      res.json(hydrated);
+    } catch (error) {
+      res.status(target.source === 'github' ? 400 : 500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   if (args.dev) {
     await attachViteDevMiddleware(app, args.verbose);
   } else {
@@ -449,6 +471,76 @@ async function runServer(args) {
     console.error(`yadiff: could not open the browser automatically; visit ${url}`);
   }
   scheduleIdleShutdown();
+}
+
+async function createHydratedDiffResponse(target, patch, cacheKeyPrefix) {
+  const parsedPatches = parsePatchFiles(patch, encodeURIComponent(cacheKeyPrefix));
+  if (typeof target.getFileContents !== 'function') {
+    return { patches: parsedPatches, hydratedFiles: 0, totalFiles: countParsedFiles(parsedPatches) };
+  }
+
+  const filePatchChunks = splitPatchFileChunks(patch);
+  let fileChunkIndex = 0;
+  let hydratedFiles = 0;
+  let totalFiles = 0;
+  const patches = [];
+
+  for (let patchIndex = 0; patchIndex < parsedPatches.length; patchIndex++) {
+    const parsedPatch = parsedPatches[patchIndex];
+    const files = [];
+    for (let fileIndex = 0; fileIndex < parsedPatch.files.length; fileIndex++) {
+      const partialFile = parsedPatch.files[fileIndex];
+      const filePatch = filePatchChunks[fileChunkIndex++];
+      totalFiles++;
+
+      if (filePatch == null) {
+        files.push(partialFile);
+        continue;
+      }
+
+      try {
+        const contents = await target.getFileContents(partialFile);
+        if (contents == null) {
+          files.push(partialFile);
+          continue;
+        }
+
+        const hydratedFile = processFile(filePatch, {
+          ...contents,
+          cacheKey: `${encodeURIComponent(cacheKeyPrefix)}-${patchIndex}-${fileIndex}:hydrated`,
+          throwOnError: true,
+        });
+        if (hydratedFile == null) {
+          files.push(partialFile);
+          continue;
+        }
+        files.push(hydratedFile);
+        if (!hydratedFile.isPartial) {
+          hydratedFiles++;
+        }
+      } catch {
+        files.push(partialFile);
+      }
+    }
+    patches.push({ ...parsedPatch, files });
+  }
+
+  return { patches, hydratedFiles, totalFiles };
+}
+
+function splitPatchFileChunks(patch) {
+  const starts = [];
+  const diffHeader = /^diff --git /gm;
+  let match;
+  while ((match = diffHeader.exec(patch)) != null) {
+    starts.push(match.index);
+  }
+
+  return starts.map((start, index) => patch.slice(start, starts[index + 1]));
+}
+
+function countParsedFiles(patches) {
+  return patches.reduce((total, patch) => total + patch.files.length, 0);
 }
 
 function listenWithFallback(server, preferredPort, host, portExplicit, verbose) {
@@ -506,6 +598,14 @@ function readGitCommitHash() {
 function formatSource(source) {
   if (source === 'github') return 'GitHub';
   return source;
+}
+
+function hashString(value) {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index++) {
+    hash = (Math.imul(hash, 33) ^ value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
 }
 
 function formatBytes(bytes) {

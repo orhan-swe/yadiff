@@ -1,3 +1,5 @@
+import type { ParsedPatch } from '@pierre/diffs';
+
 import { byteLength } from './format';
 import { delay } from './utils';
 import type { DiffResponse, DiffStatusResponse } from './types';
@@ -23,6 +25,22 @@ export async function fetchCommitPatchText(commitId: string): Promise<string> {
         throw new Error(data.error ?? `Request failed (${result.status})`);
     }
     return data.patch;
+}
+
+export interface HydratedDiffResponse {
+    patches: ParsedPatch[];
+    hydratedFiles: number;
+    totalFiles: number;
+}
+
+export async function fetchHydratedDiff(commitId: string | null): Promise<HydratedDiffResponse> {
+    const search = commitId == null ? '' : `?commitId=${encodeURIComponent(commitId)}`;
+    const result = await fetch(`/api/hydrated-diff${search}`, { cache: 'no-store' });
+    const data = await result.json();
+    if (!result.ok) {
+        throw new Error(data.error ?? `Request failed (${result.status})`);
+    }
+    return data as HydratedDiffResponse;
 }
 
 async function pollUntilReady(onStatus: (status: DiffStatusResponse) => void): Promise<void> {
