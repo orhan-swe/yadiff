@@ -433,6 +433,43 @@ async function runServer(args) {
     }
   });
 
+  app.get('/api/file', async (req, res) => {
+    try {
+      const path = typeof req.query.path === 'string' ? req.query.path : null;
+      if (path == null) {
+        res.status(400).type('text/plain').send('Missing path query parameter.');
+        return;
+      }
+      if (typeof target.getFileContents !== 'function') {
+        res.status(404).type('text/plain').send('Full file contents are not available for this source.');
+        return;
+      }
+
+      const commitId = typeof req.query.commitId === 'string' ? req.query.commitId : null;
+      const patch = commitId == null ? await target.getPatch() : await target.getCommitPatch(commitId);
+      const file = findPatchedFile(parsePatchFiles(patch), path);
+      if (file == null) {
+        res.status(404).type('text/plain').send(`No changed file matches ${path}.`);
+        return;
+      }
+
+      const contents = await target.getFileContents(file);
+      const side = file.type === 'deleted' ? contents?.oldFile : contents?.newFile;
+      if (side == null) {
+        res.status(404).type('text/plain').send(`Could not read the full contents of ${path}.`);
+        return;
+      }
+
+      res
+        .type('text/plain; charset=utf-8')
+        .set('X-Content-Type-Options', 'nosniff')
+        .set('Content-Disposition', 'inline')
+        .send(side.contents);
+    } catch (error) {
+      res.status(target.source === 'github' ? 400 : 500).type('text/plain').send(error instanceof Error ? error.message : String(error));
+    }
+  });
+
   if (args.dev) {
     await attachViteDevMiddleware(app, args.verbose);
   } else {
@@ -541,6 +578,17 @@ function splitPatchFileChunks(patch) {
 
 function countParsedFiles(patches) {
   return patches.reduce((total, patch) => total + patch.files.length, 0);
+}
+
+function findPatchedFile(patches, path) {
+  for (const patch of patches) {
+    for (const file of patch.files) {
+      if (file.name === path || file.prevName === path) {
+        return file;
+      }
+    }
+  }
+  return undefined;
 }
 
 function listenWithFallback(server, preferredPort, host, portExplicit, verbose) {

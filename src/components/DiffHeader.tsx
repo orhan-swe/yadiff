@@ -17,12 +17,16 @@ export function DiffHeader({
     file,
     fileReviews,
     onToggle,
+    rawFileHint,
+    rawFileHref,
 }: {
     actions: FileReviewActions;
     draftReview: DraftReview | null;
     file: ProjectedFile;
     fileReviews: SavedReview[];
     onToggle: () => void;
+    rawFileHint: string | null;
+    rawFileHref: string | null;
 }) {
     const hasFileReviewThread = draftReview != null || fileReviews.length > 0;
 
@@ -50,6 +54,7 @@ export function DiffHeader({
                 </button>
                 <div className="fileHeaderActions">
                     <FileActions path={file.path} />
+                    <RawFileControl hint={rawFileHint} href={rawFileHref} />
                     <FileReviewControls onReviewFile={actions.onReviewFile} />
                     <FileMeta file={file} />
                 </div>
@@ -110,6 +115,32 @@ function FileReviewControls({ onReviewFile }: { onReviewFile: () => void }) {
             <button type="button" className="fileReviewButton" onClick={onReviewFile}>
                 Review file
             </button>
+        </div>
+    );
+}
+
+function RawFileControl({ hint, href }: { hint: string | null; href: string | null }) {
+    if (href == null) {
+        return (
+            <div className="fileActions">
+                <button type="button" className="fileReviewButton" disabled title={hint ?? undefined}>
+                    View file
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="fileActions">
+            <a
+                className="fileReviewButton"
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open the full file, read-only, in a new tab"
+            >
+                View file
+            </a>
         </div>
     );
 }

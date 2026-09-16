@@ -427,6 +427,9 @@ h1 span { color: var(--yd-muted); font-family: ui-monospace, SFMono-Regular, Men
   list-style: none;
 }
 .fileReviewButton:hover { background: var(--yd-surface-active); }
+.fileReviewButton:disabled { opacity: 0.5; cursor: not-allowed; }
+.fileReviewButton:disabled:hover { background: var(--yd-surface); }
+a.fileReviewButton { display: inline-block; text-decoration: none; }
 .fileReviewThread {
   padding: 0 16px 10px;
 }
