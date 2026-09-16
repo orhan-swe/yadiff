@@ -460,6 +460,15 @@ async function runServer(args) {
         return;
       }
 
+      if (req.query.format === 'raw') {
+        res
+          .type('text/plain; charset=utf-8')
+          .set('X-Content-Type-Options', 'nosniff')
+          .set('Content-Disposition', 'inline')
+          .send(side.contents);
+        return;
+      }
+
       res
         .type('text/html; charset=utf-8')
         .set('X-Content-Type-Options', 'nosniff')

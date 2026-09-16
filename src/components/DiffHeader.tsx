@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ProjectedFile } from '../diffProjection';
-import type { DraftReview, SavedReview } from '../types';
+import type { DraftReview, FileLinks, SavedReview } from '../types';
 import { DraftReviewBox, SavedReviewAnnotation } from './ReviewAnnotations';
 
 export interface FileReviewActions {
@@ -15,18 +15,16 @@ export function DiffHeader({
     actions,
     draftReview,
     file,
+    fileLinks,
     fileReviews,
     onToggle,
-    rawFileHint,
-    rawFileHref,
 }: {
     actions: FileReviewActions;
     draftReview: DraftReview | null;
     file: ProjectedFile;
+    fileLinks: FileLinks;
     fileReviews: SavedReview[];
     onToggle: () => void;
-    rawFileHint: string | null;
-    rawFileHref: string | null;
 }) {
     const hasFileReviewThread = draftReview != null || fileReviews.length > 0;
 
@@ -53,9 +51,11 @@ export function DiffHeader({
                     </span>
                 </button>
                 <div className="fileHeaderActions">
-                    <FileActions path={file.path} />
-                    <RawFileControl hint={rawFileHint} href={rawFileHref} />
-                    <FileReviewControls onReviewFile={actions.onReviewFile} />
+                    <FileActionsMenu
+                        links={fileLinks}
+                        onReviewFile={actions.onReviewFile}
+                        path={file.path}
+                    />
                     <FileMeta file={file} />
                 </div>
             </div>
@@ -82,13 +82,56 @@ export function DiffHeader({
     );
 }
 
-function FileActions({ path }: { path: string }) {
+/**
+ * File actions live behind a single menu button so the file name keeps the header's
+ * horizontal space, and so new actions stay cheap to add.
+ */
+function FileActionsMenu({
+    links,
+    onReviewFile,
+    path,
+}: {
+    links: FileLinks;
+    onReviewFile: () => void;
+    path: string;
+}) {
+    const [open, setOpen] = useState(false);
     const [copied, setCopied] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!open) {
+            return;
+        }
+
+        const onPointerDown = (event: PointerEvent) => {
+            if (menuRef.current?.contains(event.target as Node) !== true) {
+                setOpen(false);
+            }
+        };
+        // Escape is a no-op in the app keyboard router while this menu is open, so
+        // closing here cannot collide with a shortcut action.
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setOpen(false);
+            }
+        };
+
+        document.addEventListener('pointerdown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', onPointerDown);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [open]);
+
+    const closeMenu = () => setOpen(false);
 
     const onCopy = async () => {
         try {
             await navigator.clipboard.writeText(path);
             setCopied(true);
+            // Keep the menu open so the confirmation is actually visible.
             setTimeout(() => setCopied(false), 1500);
         } catch {
             setCopied(false);
@@ -96,52 +139,90 @@ function FileActions({ path }: { path: string }) {
     };
 
     return (
-        <div className="fileActions">
+        <div className="fileActionsMenu" ref={menuRef}>
             <button
                 type="button"
-                className="fileReviewButton"
-                onClick={onCopy}
-                title="Copy file name"
+                className="fileReviewButton fileMenuToggle"
+                aria-expanded={open}
+                aria-label="File actions"
+                onClick={() => setOpen((value) => !value)}
+                title="File actions"
             >
-                {copied ? 'Copied' : 'Copy file name'}
+                <span aria-hidden="true">⋯</span>
             </button>
+            {open ? (
+                <div className="fileMenu" aria-label="File actions">
+                    <button type="button" className="fileMenuItem" onClick={onCopy}>
+                        {copied ? 'Copied' : 'Copy file name'}
+                    </button>
+                    <FileMenuLink
+                        hint={links.hint}
+                        href={links.href}
+                        onOpen={closeMenu}
+                        title="Open the full file, read-only, in a new tab, with added lines highlighted"
+                    >
+                        View file
+                    </FileMenuLink>
+                    <FileMenuLink
+                        hint={links.hint}
+                        href={links.rawHref}
+                        onOpen={closeMenu}
+                        title="Open the raw file contents in a new tab, with no highlighting"
+                    >
+                        Open raw file
+                    </FileMenuLink>
+                    <button
+                        type="button"
+                        className="fileMenuItem"
+                        onClick={() => {
+                            onReviewFile();
+                            setOpen(false);
+                        }}
+                    >
+                        Review file
+                    </button>
+                </div>
+            ) : null}
         </div>
     );
 }
 
-function FileReviewControls({ onReviewFile }: { onReviewFile: () => void }) {
-    return (
-        <div className="fileReviewControls">
-            <button type="button" className="fileReviewButton" onClick={onReviewFile}>
-                Review file
-            </button>
-        </div>
-    );
-}
-
-function RawFileControl({ hint, href }: { hint: string | null; href: string | null }) {
+/**
+ * Menu entry that opens a file in a new tab. When the link is unavailable the entry is
+ * disabled and explains why, so the action stays discoverable instead of disappearing.
+ */
+function FileMenuLink({
+    children,
+    hint,
+    href,
+    onOpen,
+    title,
+}: {
+    children: string;
+    hint: string | null;
+    href: string | null;
+    onOpen: () => void;
+    title: string;
+}) {
     if (href == null) {
         return (
-            <div className="fileActions">
-                <button type="button" className="fileReviewButton" disabled title={hint ?? undefined}>
-                    View file
-                </button>
-            </div>
+            <button type="button" className="fileMenuItem" disabled title={hint ?? undefined}>
+                {children}
+            </button>
         );
     }
 
     return (
-        <div className="fileActions">
-            <a
-                className="fileReviewButton"
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open the full file, read-only, in a new tab, with added lines highlighted"
-            >
-                View file
-            </a>
-        </div>
+        <a
+            className="fileMenuItem"
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={title}
+            onClick={onOpen}
+        >
+            {children}
+        </a>
     );
 }
 

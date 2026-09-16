@@ -5,7 +5,7 @@ import { REVIEW_UNSAFE_CSS } from '../constants';
 import type { ProjectedFile, ProjectedFileIdentity } from '../diffProjection';
 import { createDraftReview, isFileReviewTarget, reviewMatchesFile, saveDraftReview } from '../reviews';
 import type { DiffViewerModel } from '../useDiffViewerModel';
-import type { SavedReview, Source } from '../types';
+import type { FileLinks, SavedReview, Source } from '../types';
 import { useThemeContext } from '../useTheme';
 import { DiffHeader } from './DiffHeader';
 import { DraftReviewBox, SavedReviewAnnotation } from './ReviewAnnotations';
@@ -144,7 +144,7 @@ export function DiffViewer({
                         if (file == null) return null;
                         const fileReviews = fileReviewIndex.get(file.id) ?? [];
                         const fileDraftReview = draftReview != null && isFileReviewTarget(draftReview.target) && reviewMatchesFile(draftReview, file.id) ? draftReview : null;
-                        const rawFile = getRawFileTarget({ activeCommitId, file, source: response?.source });
+                        const fileLinks = getFileLinks({ activeCommitId, file, source: response?.source });
                         return (
                             <DiffHeader
                                 actions={{
@@ -159,8 +159,7 @@ export function DiffViewer({
                                 }}
                                 draftReview={fileDraftReview}
                                 file={file}
-                                rawFileHint={rawFile.hint}
-                                rawFileHref={rawFile.href}
+                                fileLinks={fileLinks}
                                 fileReviews={fileReviews}
                                 onToggle={() => {
                                     setCollapsedIds((current) => {
@@ -183,11 +182,11 @@ export function DiffViewer({
 }
 
 /**
- * "View file" opens the raw, read-only file in a new tab. Full file contents come from the
- * same source adapters that hydrate diffs, so they are unavailable for GitHub targets and
- * for deleted files, which have no new side to read.
+ * Links for reading a file outside the diff: the rendered page (added lines highlighted)
+ * and the raw contents. Both are served from the same source adapters that hydrate diffs,
+ * so they are unavailable for GitHub targets and for deleted files, which have no new side.
  */
-function getRawFileTarget({
+function getFileLinks({
     activeCommitId,
     file,
     source,
@@ -195,17 +194,23 @@ function getRawFileTarget({
     activeCommitId: string | null;
     file: ProjectedFile;
     source: Source | undefined;
-}): { href: string | null; hint: string | null } {
+}): FileLinks {
     if (source === 'github') {
-        return { href: null, hint: 'Full file contents are not available for GitHub pull request targets.' };
+        return { hint: 'Full file contents are not available for GitHub pull request targets.', href: null, rawHref: null };
     }
     if (file.changeType === 'deleted') {
-        return { href: null, hint: 'This file was deleted, so there is no full file to open.' };
+        return { hint: 'This file was deleted, so there is no full file to open.', href: null, rawHref: null };
     }
 
     const search = new URLSearchParams({ path: file.path });
     if (activeCommitId != null) {
         search.set('commitId', activeCommitId);
     }
-    return { href: `/api/file?${search.toString()}`, hint: null };
+    const rawSearch = new URLSearchParams(search);
+    rawSearch.set('format', 'raw');
+    return {
+        hint: null,
+        href: `/api/file?${search.toString()}`,
+        rawHref: `/api/file?${rawSearch.toString()}`,
+    };
 }

@@ -413,8 +413,7 @@ h1 span { color: var(--yd-muted); font-family: ui-monospace, SFMono-Regular, Men
 .renameArrow { color: var(--yd-subtle); font-size: 0.85em; }
 .fileHeaderActions { display: inline-flex; align-items: center; gap: 10px; flex: none; }
 .fileMeta { display: inline-flex; gap: 8px; align-items: center; color: var(--yd-muted); font-size: 12px; flex: none; }
-.fileReviewControls { display: inline-flex; align-items: center; gap: 6px; }
-.fileActions { display: inline-flex; align-items: center; gap: 6px; }
+.fileActionsMenu { position: relative; display: inline-flex; align-items: center; }
 .fileReviewButton {
   border: 1px solid var(--yd-border);
   border-radius: 999px;
@@ -429,7 +428,41 @@ h1 span { color: var(--yd-muted); font-family: ui-monospace, SFMono-Regular, Men
 .fileReviewButton:hover { background: var(--yd-surface-active); }
 .fileReviewButton:disabled { opacity: 0.5; cursor: not-allowed; }
 .fileReviewButton:disabled:hover { background: var(--yd-surface); }
-a.fileReviewButton { display: inline-block; text-decoration: none; }
+.fileMenuToggle { padding: 4px 9px; font-size: 13px; line-height: 1; }
+.fileMenuToggle[aria-expanded='true'] { background: var(--yd-surface-active); }
+.fileMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 148px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--yd-popover-border);
+  border-radius: 12px;
+  background: var(--yd-popover-bg);
+  box-shadow: var(--yd-popover-shadow);
+}
+.fileMenuItem {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--yd-fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fileMenuItem:hover { background: var(--yd-surface-active); }
+.fileMenuItem:disabled { opacity: 0.5; cursor: not-allowed; }
+.fileMenuItem:disabled:hover { background: transparent; }
 .fileReviewThread {
   padding: 0 16px 10px;
 }
