@@ -461,10 +461,15 @@ async function runServer(args) {
       }
 
       res
-        .type('text/plain; charset=utf-8')
+        .type('text/html; charset=utf-8')
         .set('X-Content-Type-Options', 'nosniff')
+        .set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
         .set('Content-Disposition', 'inline')
-        .send(side.contents);
+        .send(renderFilePage({
+          addedLines: getAddedLineNumbers(file),
+          contents: side.contents,
+          path: file.name,
+        }));
     } catch (error) {
       res.status(target.source === 'github' ? 400 : 500).type('text/plain').send(error instanceof Error ? error.message : String(error));
     }
@@ -589,6 +594,96 @@ function findPatchedFile(patches, path) {
     }
   }
   return undefined;
+}
+
+/**
+ * New-side line numbers that this diff introduces. Deletions are deliberately ignored:
+ * the file page renders the file as it exists now, so removed lines have nothing to mark.
+ * Added files are covered by the same walk, since git emits one hunk spanning the file.
+ */
+function getAddedLineNumbers(file) {
+  const added = new Set();
+  for (const hunk of file.hunks) {
+    let lineNumber = hunk.additionStart;
+    for (const content of hunk.hunkContent) {
+      if (content.type === 'context') {
+        lineNumber += content.lines;
+        continue;
+      }
+      for (let offset = 0; offset < content.additions; offset++) {
+        added.add(lineNumber + offset);
+      }
+      lineNumber += content.additions;
+    }
+  }
+  return added;
+}
+
+const FILE_PAGE_CSS = `
+:root {
+  color-scheme: light dark;
+  --page-bg: #ffffff;
+  --page-fg: #18181b;
+  --page-added-bg: rgba(46, 160, 67, 0.15);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page-bg: #09090b;
+    --page-fg: #f4f4f5;
+    --page-added-bg: rgba(46, 160, 67, 0.22);
+  }
+}
+html, body { margin: 0; background: var(--page-bg); color: var(--page-fg); }
+pre {
+  margin: 0;
+  padding: 12px 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 4;
+}
+code { display: block; width: max-content; min-width: 100%; }
+.line { display: block; padding: 0 16px; }
+.line.added { background: var(--page-added-bg); }
+`;
+
+/**
+ * Render the whole file as a standalone read-only page. File contents are untrusted text,
+ * so every line and the title are escaped before being placed in the document.
+ */
+function renderFilePage({ addedLines, contents, path }) {
+  const lines = contents.replace(/\r\n/g, '\n').split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+
+  const body = lines
+    .map((line, index) => {
+      const className = addedLines.has(index + 1) ? 'line added' : 'line';
+      return `<span class="${className}">${escapeHtml(line)}</span>`;
+    })
+    .join('\n');
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(path)}</title>
+<style>${FILE_PAGE_CSS}</style>
+</head>
+<body>
+<pre><code>${body}</code></pre>
+</body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function listenWithFallback(server, preferredPort, host, portExplicit, verbose) {

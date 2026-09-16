@@ -137,7 +137,7 @@ function RawFileControl({ hint, href }: { hint: string | null; href: string | nu
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Open the full file, read-only, in a new tab"
+                title="Open the full file, read-only, in a new tab, with added lines highlighted"
             >
                 View file
             </a>
