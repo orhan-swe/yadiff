@@ -98,7 +98,7 @@ export function DiffViewer({
                         enableLineSelection: true,
                         stickyHeaders: true,
                         unsafeCSS: REVIEW_UNSAFE_CSS,
-                        layout: { paddingTop: 12, paddingBottom: 32, gap: 12 },
+                        layout: { paddingTop: 12, paddingBottom: 32, gap: 0 },
                         onGutterUtilityClick: (range, context) => {
                             if (context.item.type !== 'diff') {
                                 return;

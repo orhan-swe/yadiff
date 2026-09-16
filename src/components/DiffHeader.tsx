@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState, type MouseEvent } from 'react';
+import { createPortal } from 'react-dom';
+
 import type { ProjectedFile } from '../diffProjection';
 import type { DraftReview, FileLinks, SavedReview } from '../types';
+import { useDismissablePopover } from '../useDismissablePopover';
 import { DraftReviewBox, SavedReviewAnnotation } from './ReviewAnnotations';
+
+/** Room needed below the toggle for the menu to open downward instead of upward. */
+const MENU_SPACE_BELOW = 200;
 
 export interface FileReviewActions {
     onDeleteReview: (id: string) => void;
@@ -97,35 +103,34 @@ function FileActionsMenu({
 }) {
     const [open, setOpen] = useState(false);
     const [copied, setCopied] = useState(false);
-    const menuRef = useRef<HTMLDivElement>(null);
+    const [position, setPosition] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
+    const toggleRef = useRef<HTMLButtonElement>(null);
+    const menuRef = useDismissablePopover({
+        anchorRef: toggleRef,
+        closeOnScroll: true,
+        onClose: () => setOpen(false),
+        open,
+    });
 
-    useEffect(() => {
-        if (!open) {
+    const closeMenu = () => setOpen(false);
+
+    const toggleMenu = (event: MouseEvent<HTMLButtonElement>) => {
+        if (open) {
+            setOpen(false);
             return;
         }
 
-        const onPointerDown = (event: PointerEvent) => {
-            if (menuRef.current?.contains(event.target as Node) !== true) {
-                setOpen(false);
-            }
-        };
-        // Escape is a no-op in the app keyboard router while this menu is open, so
-        // closing here cannot collide with a shortcut action.
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                setOpen(false);
-            }
-        };
-
-        document.addEventListener('pointerdown', onPointerDown);
-        document.addEventListener('keydown', onKeyDown);
-        return () => {
-            document.removeEventListener('pointerdown', onPointerDown);
-            document.removeEventListener('keydown', onKeyDown);
-        };
-    }, [open]);
-
-    const closeMenu = () => setOpen(false);
+        // The menu is portaled to the body, so it is positioned from the button's viewport
+        // rect. Portaling is required because each file item is its own stacking context
+        // (the diff container sets `contain: layout`), so no z-index keeps a menu inside the
+        // header above the next file's content.
+        const rect = event.currentTarget.getBoundingClientRect();
+        const right = Math.max(window.innerWidth - rect.right, 0);
+        setPosition(window.innerHeight - rect.bottom < MENU_SPACE_BELOW
+            ? { bottom: window.innerHeight - rect.top + 6, right }
+            : { top: rect.bottom + 6, right });
+        setOpen(true);
+    };
 
     const onCopy = async () => {
         try {
@@ -139,19 +144,20 @@ function FileActionsMenu({
     };
 
     return (
-        <div className="fileActionsMenu" ref={menuRef}>
+        <div className="fileActionsMenu">
             <button
+                ref={toggleRef}
                 type="button"
                 className="fileReviewButton fileMenuToggle"
                 aria-expanded={open}
                 aria-label="File actions"
-                onClick={() => setOpen((value) => !value)}
+                onClick={toggleMenu}
                 title="File actions"
             >
                 <span aria-hidden="true">⋯</span>
             </button>
-            {open ? (
-                <div className="fileMenu" aria-label="File actions">
+            {open && position != null ? createPortal(
+                <div className="fileMenu" style={position} ref={menuRef} aria-label="File actions">
                     <button type="button" className="fileMenuItem" onClick={onCopy}>
                         {copied ? 'Copied' : 'Copy file name'}
                     </button>
@@ -181,7 +187,8 @@ function FileActionsMenu({
                     >
                         Review file
                     </button>
-                </div>
+                </div>,
+                document.body
             ) : null}
         </div>
     );
