@@ -6,6 +6,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
+import MarkdownIt from 'markdown-it';
+
 import { parsePatchFiles, processFile } from '@pierre/diffs';
 
 import { createTarget } from '../lib/target/index.js';
@@ -469,16 +471,19 @@ async function runServer(args) {
         return;
       }
 
+      const markdownFile = isMarkdownPath(file.name);
       res
         .type('text/html; charset=utf-8')
         .set('X-Content-Type-Options', 'nosniff')
-        .set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
+        .set('Content-Security-Policy', markdownFile ? MARKDOWN_PAGE_CSP : SOURCE_PAGE_CSP)
         .set('Content-Disposition', 'inline')
-        .send(renderFilePage({
-          addedLines: getAddedLineNumbers(file),
-          contents: side.contents,
-          path: file.name,
-        }));
+        .send(markdownFile
+          ? renderMarkdownPage({ contents: side.contents, path: file.name })
+          : renderFilePage({
+              addedLines: getAddedLineNumbers(file),
+              contents: side.contents,
+              path: file.name,
+            }));
     } catch (error) {
       res.status(target.source === 'github' ? 400 : 500).type('text/plain').send(error instanceof Error ? error.message : String(error));
     }
@@ -628,22 +633,52 @@ function getAddedLineNumbers(file) {
   return added;
 }
 
-const FILE_PAGE_CSS = `
+const SOURCE_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'";
+
+/**
+ * Markdown pages allow inline HTML, which READMEs commonly use for badges and inline
+ * images. Scripts still cannot run: the page declares no script-src, so it falls back to
+ * default-src 'none'. form-action and base-uri are pinned for the same reason.
+ */
+const MARKDOWN_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; form-action 'none'; base-uri 'none'";
+
+const MARKDOWN_EXTENSIONS = ['.md', '.markdown', '.mdown', '.mkd'];
+
+const markdown = new MarkdownIt({ html: true, linkify: true });
+
+function isMarkdownPath(path) {
+  const lower = path.toLowerCase();
+  return MARKDOWN_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+const PAGE_BASE_CSS = `
 :root {
   color-scheme: light dark;
   --page-bg: #ffffff;
   --page-fg: #18181b;
+  --page-muted: #52525b;
+  --page-border: rgba(0, 0, 0, 0.12);
+  --page-code-bg: rgba(0, 0, 0, 0.05);
+  --page-link: #2563eb;
   --page-added-bg: rgba(46, 160, 67, 0.15);
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --page-bg: #09090b;
     --page-fg: #f4f4f5;
+    --page-muted: #a1a1aa;
+    --page-border: rgba(255, 255, 255, 0.14);
+    --page-code-bg: rgba(255, 255, 255, 0.06);
+    --page-link: #7aa2f7;
     --page-added-bg: rgba(46, 160, 67, 0.22);
   }
 }
 html, body { margin: 0; background: var(--page-bg); color: var(--page-fg); }
-pre {
+`;
+
+/* Scoped to .source so the line-box rules cannot leak into rendered markdown. */
+const SOURCE_CSS = `
+.source pre {
   margin: 0;
   padding: 12px 0;
   overflow-x: auto;
@@ -652,10 +687,58 @@ pre {
   line-height: 1.5;
   tab-size: 4;
 }
-code { display: block; width: max-content; min-width: 100%; }
+.source code { display: block; width: max-content; min-width: 100%; }
 .line { display: block; padding: 0 16px; }
 .line.added { background: var(--page-added-bg); }
 `;
+
+const MARKDOWN_CSS = `
+.markdown {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 20px 72px;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.6;
+}
+.markdown > :first-child { margin-top: 0; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5 { margin: 1.5em 0 0.6em; line-height: 1.25; }
+.markdown h1 { font-size: 27px; padding-bottom: 0.3em; border-bottom: 1px solid var(--page-border); }
+.markdown h2 { font-size: 21px; padding-bottom: 0.3em; border-bottom: 1px solid var(--page-border); }
+.markdown h3 { font-size: 17px; }
+.markdown p, .markdown ul, .markdown ol, .markdown blockquote, .markdown table, .markdown pre { margin: 0 0 1em; }
+.markdown ul, .markdown ol { padding-left: 1.5em; }
+.markdown li + li { margin-top: 0.2em; }
+.markdown a { color: var(--page-link); }
+.markdown code {
+  padding: 0.15em 0.35em;
+  border-radius: 5px;
+  background: var(--page-code-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88em;
+}
+.markdown pre { overflow-x: auto; padding: 12px 14px; border: 1px solid var(--page-border); border-radius: 10px; background: var(--page-code-bg); }
+.markdown pre code { padding: 0; background: transparent; }
+.markdown blockquote { padding: 0 1em; border-left: 3px solid var(--page-border); color: var(--page-muted); }
+.markdown img { max-width: 100%; }
+.markdown table { border-collapse: collapse; }
+.markdown th, .markdown td { border: 1px solid var(--page-border); padding: 6px 10px; }
+.markdown hr { margin: 2em 0; border: 0; border-top: 1px solid var(--page-border); }
+`;
+
+function renderHtmlPage({ body, path, styles }) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(path)}</title>
+<style>${PAGE_BASE_CSS}${styles}</style>
+</head>
+<body>
+${body}
+</body>
+</html>`;
+}
 
 /**
  * Render the whole file as a standalone read-only page. File contents are untrusted text,
@@ -674,18 +757,23 @@ function renderFilePage({ addedLines, contents, path }) {
     })
     .join('\n');
 
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(path)}</title>
-<style>${FILE_PAGE_CSS}</style>
-</head>
-<body>
-<pre><code>${body}</code></pre>
-</body>
-</html>`;
+  return renderHtmlPage({
+    body: `<div class="source"><pre><code>${body}</code></pre></div>`,
+    path,
+    styles: SOURCE_CSS,
+  });
+}
+
+/**
+ * Render markdown as a formatted page. Inline HTML is kept so READMEs keep their badges and
+ * inline images; the response CSP is what keeps scripts and form posts out of the page.
+ */
+function renderMarkdownPage({ contents, path }) {
+  return renderHtmlPage({
+    body: `<article class="markdown">${markdown.render(contents)}</article>`,
+    path,
+    styles: MARKDOWN_CSS,
+  });
 }
 
 function escapeHtml(value) {

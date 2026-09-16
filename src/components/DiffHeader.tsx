@@ -165,7 +165,7 @@ function FileActionsMenu({
                         hint={links.hint}
                         href={links.href}
                         onOpen={closeMenu}
-                        title="Open the full file, read-only, in a new tab, with added lines highlighted"
+                        title="Open the full file, read-only, in a new tab"
                     >
                         View file
                     </FileMenuLink>
