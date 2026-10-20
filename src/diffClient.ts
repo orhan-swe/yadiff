@@ -27,6 +27,24 @@ export async function fetchCommitPatchText(commitId: string): Promise<string> {
     return data.patch;
 }
 
+/** Local file modification times keyed by path. Unsupported sources return an empty map. */
+export async function fetchFileTimes(paths: readonly string[]): Promise<Map<string, number>> {
+    if (paths.length === 0) {
+        return new Map();
+    }
+    const result = await fetch('/api/file-times', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths }),
+        cache: 'no-store',
+    });
+    const data = await result.json();
+    if (!result.ok) {
+        throw new Error(data.error ?? `Request failed (${result.status})`);
+    }
+    return new Map(Object.entries((data.times ?? {}) as Record<string, number>));
+}
+
 export interface HydratedDiffResponse {
     patches: ParsedPatch[];
     hydratedFiles: number;

@@ -28,7 +28,7 @@ export function ReadyDiffView({ model }: { model: DiffViewerModel }) {
         reviewButtonLabel,
         reviews,
         selectCommit,
-        setCollapsedIds,
+        setExpandedIds,
         setCopyStatus,
         setDiffStyle,
         setDraftReview,
@@ -99,7 +99,7 @@ export function ReadyDiffView({ model }: { model: DiffViewerModel }) {
                     parsed={parsed}
                     response={response}
                     reviews={reviews}
-                    setCollapsedIds={setCollapsedIds}
+                    setExpandedIds={setExpandedIds}
                     setCopyStatus={setCopyStatus}
                     setDraftReview={setDraftReview}
                     setReviews={setReviews}

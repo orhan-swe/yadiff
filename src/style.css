@@ -415,6 +415,8 @@ h1 span { color: var(--yd-muted); font-family: ui-monospace, SFMono-Regular, Men
 .renameArrow { color: var(--yd-subtle); font-size: 0.85em; }
 .fileHeaderActions { display: inline-flex; align-items: center; gap: 10px; flex: none; }
 .fileMeta { display: inline-flex; gap: 8px; align-items: center; color: var(--yd-muted); font-size: 12px; flex: none; }
+.fileAge { font-variant-numeric: tabular-nums; }
+.fileChangeTypeShort { display: none; }
 .fileActionsMenu { display: inline-flex; align-items: center; }
 .fileReviewButton {
   border: 1px solid var(--yd-border);
@@ -587,4 +589,6 @@ h1 span { color: var(--yd-muted); font-family: ui-monospace, SFMono-Regular, Men
   .sidebarHidden { width: auto; transform: none; padding: 4px 8px; }
   .sidebarHidden .sidebarToggle { margin: 0; min-height: 28px; padding: 4px 10px; writing-mode: horizontal-tb; }
   .fileReviewThread { padding-inline: 8px; }
+  .fileChangeTypeFull { display: none; }
+  .fileChangeTypeShort { display: inline; }
 }

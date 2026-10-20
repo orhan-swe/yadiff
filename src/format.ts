@@ -65,3 +65,20 @@ export function formatCopyStatus(status: 'copied' | 'empty' | 'error') {
     if (status === 'empty') return 'No reviews';
     return 'Copy failed';
 }
+
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+const MINUTES_THRESHOLD_MS = 3 * HOUR_MS;
+
+/**
+ * Coarse file age: whole minutes below three hours (`95m`), then days with one
+ * decimal (`0.1d`, `1.0d`).
+ */
+export function formatFileAge(changedAt: number, now = Date.now()): string {
+    const elapsed = Math.max(0, now - changedAt);
+    if (elapsed < MINUTES_THRESHOLD_MS) {
+        return `${Math.floor(elapsed / MINUTE_MS)}m`;
+    }
+    return `${(elapsed / DAY_MS).toFixed(1)}d`;
+}

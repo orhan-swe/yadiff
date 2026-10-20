@@ -5,10 +5,11 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 
 import {
     createDiffProjection,
+    listProjectedFilePaths,
     parseDiffPatch,
     type ProjectedFileIdentity,
 } from './diffProjection';
-import { fetchCommitPatchText, fetchDiffMetadata, fetchHydratedDiff, fetchPatchText } from './diffClient';
+import { fetchCommitPatchText, fetchDiffMetadata, fetchFileTimes, fetchHydratedDiff, fetchPatchText } from './diffClient';
 import {
     byteLength,
     formatBytes,
@@ -38,7 +39,7 @@ function useAppState() {
     const [overflow, setOverflowRaw] = useState<Overflow>(() => loadPreferences().overflow ?? 'scroll');
     const [showBackgrounds, setShowBackgrounds] = useState(true);
     const [lineNumbers, setLineNumbers] = useState(true);
-    const [collapsedIds, setCollapsedIds] = useState<Set<ProjectedFileIdentity>>(() => new Set());
+    const [expandedIds, setExpandedIds] = useState<Set<ProjectedFileIdentity>>(() => new Set());
     const [reviews, setReviews] = useState<SavedReview[]>([]);
     const [draftReview, setDraftReview] = useState<DraftReview | null>(null);
     const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'empty' | 'error'>('idle');
@@ -63,7 +64,7 @@ function useAppState() {
 
     return {
         activeCommitId,
-        collapsedIds,
+        expandedIds,
         commitPatch,
         copyStatus,
         diffStyle,
@@ -79,7 +80,7 @@ function useAppState() {
         response,
         reviews,
         setActiveCommitId,
-        setCollapsedIds,
+        setExpandedIds,
         setCommitPatch,
         setCopyStatus,
         setDiffStyle,
@@ -106,7 +107,7 @@ function useAppState() {
 export function useDiffViewerModel() {
     const {
         activeCommitId,
-        collapsedIds,
+        expandedIds,
         commitPatch,
         copyStatus,
         diffStyle,
@@ -122,7 +123,7 @@ export function useDiffViewerModel() {
         response,
         reviews,
         setActiveCommitId,
-        setCollapsedIds,
+        setExpandedIds,
         setCommitPatch,
         setCopyStatus,
         setDiffStyle,
@@ -165,6 +166,7 @@ export function useDiffViewerModel() {
     });
     const treeSearch = useFileTreeSearch(treeModel);
     const [hydratedDiff, setHydratedDiff] = useState<{ key: string; patches: ParsedPatch[] } | null>(null);
+    const [fileTimes, setFileTimes] = useState<{ key: string; times: ReadonlyMap<string, number> } | null>(null);
 
     useEffect(() => {
         const session = new EventSource('/api/session');
@@ -233,7 +235,7 @@ export function useDiffViewerModel() {
         const requestId = commitRequestIdRef.current + 1;
         commitRequestIdRef.current = requestId;
         setActiveCommitId(commitId);
-        setCollapsedIds(new Set());
+        setExpandedIds(new Set());
         setReviews([]);
         setDraftReview(null);
         setCopyStatus('idle');
@@ -253,7 +255,7 @@ export function useDiffViewerModel() {
                 setCommitPatch(null);
             }
         });
-    }, [setActiveCommitId, setCollapsedIds, setCommitPatch, setCopyStatus, setDraftReview, setReviews]);
+    }, [setActiveCommitId, setExpandedIds, setCommitPatch, setCopyStatus, setDraftReview, setReviews]);
 
     const activePatch = activeCommitId != null ? (commitPatch ?? '') : patch;
     const diffKey = response == null ? 'empty' : activeCommitId ?? response.target;
@@ -283,19 +285,45 @@ export function useDiffViewerModel() {
     const parsedPatches = useMemo(() => (
         hydratedDiff?.key === diffKey ? hydratedDiff.patches : parseDiffPatch(activePatch, diffKey)
     ), [activePatch, diffKey, hydratedDiff]);
+
+    useEffect(() => {
+        if (loadState !== 'ready' || response == null || response.source === 'github' || activeCommitId != null) {
+            setFileTimes(null);
+            return;
+        }
+
+        const key = diffKey;
+        let cancelled = false;
+        void fetchFileTimes(listProjectedFilePaths(parsedPatches)).then((times) => {
+            if (!cancelled) {
+                setFileTimes({ key, times });
+            }
+        }, () => {
+            if (!cancelled) {
+                setFileTimes(null);
+            }
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeCommitId, diffKey, loadState, parsedPatches, response]);
+
+    const fileTimesForDiff = fileTimes?.key === diffKey ? fileTimes.times : null;
     const renderedLineReviews = useMemo(() => reviews.filter((review) => !isFileReviewTarget(review.target)), [reviews]);
     const renderedLineDraftReview = draftReview != null && !isFileReviewTarget(draftReview.target) ? draftReview : null;
     const parsed = useMemo(() => createDiffProjection<Review>({
         patches: parsedPatches,
-        collapsedFileIds: collapsedIds,
+        expandedFileIds: expandedIds,
         reviews: renderedLineReviews,
         draftReview: renderedLineDraftReview,
-    }), [collapsedIds, renderedLineDraftReview, renderedLineReviews, parsedPatches]);
+        fileTimes: fileTimesForDiff,
+    }), [expandedIds, fileTimesForDiff, renderedLineDraftReview, renderedLineReviews, parsedPatches]);
 
-    const allCollapsed = parsed.files.length > 0 && parsed.files.every((file) => collapsedIds.has(file.id));
+    const allCollapsed = parsed.files.length > 0 && parsed.files.every((file) => !expandedIds.has(file.id));
     const toggleAllCollapsed = useCallback(() => {
-        setCollapsedIds(allCollapsed ? new Set() : new Set(parsed.files.map((file) => file.id)));
-    }, [allCollapsed, parsed.files, setCollapsedIds]);
+        setExpandedIds(allCollapsed ? new Set(parsed.files.map((file) => file.id)) : new Set());
+    }, [allCollapsed, parsed.files, setExpandedIds]);
     const toggleTreeViewHidden = useCallback(() => {
         setTreeViewHidden((hidden) => {
             const nextHidden = !hidden;
@@ -341,15 +369,15 @@ export function useDiffViewerModel() {
         }
         pendingTreeScrollFileIdRef.current = fileId;
         triggerScroll();
-        setCollapsedIds((current) => {
-            if (!current.has(fileId)) {
+        setExpandedIds((current) => {
+            if (current.has(fileId)) {
                 return current;
             }
             const next = new Set(current);
-            next.delete(fileId);
+            next.add(fileId);
             return next;
         });
-    }, [parsed.files, setCollapsedIds]);
+    }, [parsed.files, setExpandedIds]);
 
     const getCurrentFileIndex = useCallback(() => {
         if (parsed.files.length === 0) {
@@ -483,7 +511,7 @@ export function useDiffViewerModel() {
         reviewButtonLabel,
         reviews,
         selectCommit,
-        setCollapsedIds,
+        setExpandedIds,
         setCopyStatus,
         setDiffStyle,
         setDraftReview,

@@ -25,7 +25,7 @@ A browser-ready representation of a **Diff** for rendering and navigation. A Dif
 _Avoid_: view model, parsed model
 
 **Projected File**:
-A file-level entry inside a **Diff Projection**. It exposes display-safe facts such as path, previous path, change type, additions, deletions, and collapse state while hiding raw parser metadata.
+A file-level entry inside a **Diff Projection**. It exposes display-safe facts such as path, previous path, change type, additions, deletions, collapse state, and last-edited time when the source provides one, while hiding raw parser metadata.
 _Avoid_: file diff metadata, parsed file
 
 **Projected File Identity**:

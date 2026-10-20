@@ -29,6 +29,8 @@ export interface ProjectedFile {
   additions: number;
   deletions: number;
   collapsed: boolean;
+  /** Local file modification time in epoch milliseconds, when the source can provide one. */
+  changedAt?: number;
 }
 
 export interface DiffProjectionReview {
@@ -45,9 +47,12 @@ export interface DiffProjectionReview {
 
 export interface CreateDiffProjectionInput<TReview extends DiffProjectionReview> {
   patches: readonly ParsedPatch[];
-  collapsedFileIds: ReadonlySet<ProjectedFileIdentity>;
+  /** Files the user has explicitly expanded. Every other file starts collapsed. */
+  expandedFileIds: ReadonlySet<ProjectedFileIdentity>;
   reviews: readonly TReview[];
   draftReview: TReview | null;
+  /** Local file modification times, used to order files newest-first. Omit to keep patch order. */
+  fileTimes?: ReadonlyMap<string, number> | null;
 }
 
 export interface DiffProjection<TReview extends DiffProjectionReview> {
@@ -63,24 +68,40 @@ export interface DiffProjection<TReview extends DiffProjectionReview> {
   getScrollTarget(fileId: ProjectedFileIdentity): CodeViewItemScrollTarget | undefined;
 }
 
+interface ProjectionEntry<TReview extends DiffProjectionReview> {
+  file: ProjectedFile;
+  item: CodeViewDiffItem<TReview>;
+  gitStatus: GitStatusEntry;
+}
+
 export function parseDiffPatch(patch: string, diffKey: string): ParsedPatch[] {
   return parsePatchFiles(patch, encodeURIComponent(diffKey));
 }
 
+/** Paths of the files that will become CodeView items, in their original patch order. */
+export function listProjectedFilePaths(patches: readonly ParsedPatch[]): string[] {
+  const paths: string[] = [];
+  for (let patchIndex = 0; patchIndex < patches.length; patchIndex++) {
+    const parsedPatch = patches[patchIndex];
+    for (let fileIndex = 0; fileIndex < parsedPatch.files.length; fileIndex++) {
+      paths.push(getProjectedPath(parsedPatch.files[fileIndex], patchIndex, fileIndex));
+    }
+  }
+  return paths;
+}
+
 export function createDiffProjection<TReview extends DiffProjectionReview>({
   patches,
-  collapsedFileIds,
+  expandedFileIds,
   reviews,
   draftReview,
+  fileTimes,
 }: CreateDiffProjectionInput<TReview>): DiffProjection<TReview> {
-  const items: CodeViewItem<TReview>[] = [];
-  const files: ProjectedFile[] = [];
-  const paths: string[] = [];
+  const entries: ProjectionEntry<TReview>[] = [];
   const fileIdByPath = new Map<string, ProjectedFileIdentity>();
   const fileById = new Map<ProjectedFileIdentity, ProjectedFile>();
   const fileByRendererItemId = new Map<string, ProjectedFile>();
   const rendererItemIdByFileId = new Map<ProjectedFileIdentity, string>();
-  const gitStatus: GitStatusEntry[] = [];
   const stats: DiffStats = { additions: 0, deletions: 0, files: 0 };
 
   for (let patchIndex = 0; patchIndex < patches.length; patchIndex++) {
@@ -92,7 +113,8 @@ export function createDiffProjection<TReview extends DiffProjectionReview>({
       const rendererItemId = String(fileId);
       const additions = countAdditions(fileDiff);
       const deletions = countDeletions(fileDiff);
-      const collapsed = collapsedFileIds.has(fileId);
+      const collapsed = !expandedFileIds.has(fileId);
+      const changedAt = fileTimes?.get(path);
       const projectedFile: ProjectedFile = {
         id: fileId,
         path,
@@ -101,35 +123,41 @@ export function createDiffProjection<TReview extends DiffProjectionReview>({
         additions,
         deletions,
         collapsed,
+        changedAt,
       };
       const annotations = getAnnotations(projectedFile, reviews, draftReview);
-
-      files.push(projectedFile);
-      paths.push(path);
-      fileIdByPath.set(path, fileId);
-      fileById.set(fileId, projectedFile);
-      fileByRendererItemId.set(rendererItemId, projectedFile);
-      rendererItemIdByFileId.set(fileId, rendererItemId);
-      gitStatus.push({ path, status: statusForFile(fileDiff) });
-      stats.files++;
-      stats.additions += additions;
-      stats.deletions += deletions;
-
-      items.push({
+      const status = statusForFile(fileDiff);
+      const item = {
         id: rendererItemId,
         type: 'diff',
         fileDiff,
         annotations,
         collapsed,
-        version: getItemVersion(fileDiff, collapsed, annotations),
-      } satisfies CodeViewDiffItem<TReview>);
+        version: getItemVersion(fileDiff, collapsed, annotations, changedAt),
+      } satisfies CodeViewDiffItem<TReview>;
+
+      fileIdByPath.set(path, fileId);
+      fileById.set(fileId, projectedFile);
+      fileByRendererItemId.set(rendererItemId, projectedFile);
+      rendererItemIdByFileId.set(fileId, rendererItemId);
+      entries.push({ file: projectedFile, item, gitStatus: { path, status } });
+      stats.files++;
+      stats.additions += additions;
+      stats.deletions += deletions;
     }
   }
+
+  const orderedEntries = orderEntriesByChangedAt(entries);
+  const items = orderedEntries.map((entry) => entry.item);
+  const files = orderedEntries.map((entry) => entry.file);
+  // Tree input keeps patch order; only the CodeView/file navigation order follows changed-at.
+  const paths = Array.from(new Set(entries.map((entry) => entry.file.path)));
+  const gitStatus = entries.map((entry) => entry.gitStatus);
 
   return {
     codeViewItems: items,
     files,
-    paths: Array.from(new Set(paths)),
+    paths,
     stats,
     gitStatus,
     getFileById(id) {
@@ -161,6 +189,31 @@ function createProjectedFileIdentity(
 
 function getProjectedPath(file: FileDiffMetadata, patchIndex: number, fileIndex: number): string {
   return file.name || file.prevName || `unknown-${patchIndex}-${fileIndex}`;
+}
+
+/**
+ * Order files newest-first by their local modification time. Files without a
+ * timestamp (deleted files, or sources that cannot provide one) keep their
+ * original patch order at the end.
+ */
+function orderEntriesByChangedAt<TEntry extends { file: ProjectedFile }>(
+  entries: readonly TEntry[]
+): TEntry[] {
+  if (!entries.some((entry) => entry.file.changedAt != null)) {
+    return [...entries];
+  }
+
+  return entries
+    .map((entry, index) => ({ entry, index, changedAt: entry.file.changedAt }))
+    .sort((left, right) => {
+      const leftChangedAt = left.changedAt ?? Number.NEGATIVE_INFINITY;
+      const rightChangedAt = right.changedAt ?? Number.NEGATIVE_INFINITY;
+      if (leftChangedAt !== rightChangedAt) {
+        return rightChangedAt - leftChangedAt;
+      }
+      return left.index - right.index;
+    })
+    .map(({ entry }) => entry);
 }
 
 function getAnnotations<TReview extends DiffProjectionReview>(
@@ -199,13 +252,15 @@ function reviewMatchesFile(review: DiffProjectionReview, file: ProjectedFile): b
 function getItemVersion<TReview extends DiffProjectionReview>(
   fileDiff: FileDiffMetadata,
   isCollapsed: boolean,
-  annotations: readonly DiffLineAnnotation<TReview>[]
+  annotations: readonly DiffLineAnnotation<TReview>[],
+  changedAt: number | undefined
 ): number {
   let hash = isCollapsed ? 17 : 31;
   hash = hashString(hash, fileDiff.cacheKey ?? '');
   hash = hashString(hash, fileDiff.isPartial ? 'partial' : 'full');
   hash = hashNumber(hash, fileDiff.additionLines.length);
   hash = hashNumber(hash, fileDiff.deletionLines.length);
+  hash = hashNumber(hash, changedAt ?? 0);
   for (const annotation of annotations) {
     const metadata = annotation.metadata;
     hash = hashNumber(hash, annotation.lineNumber);

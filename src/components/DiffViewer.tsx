@@ -20,7 +20,7 @@ interface DiffViewerProps {
     parsed: DiffViewerModel['parsed'];
     response: DiffViewerModel['response'];
     reviews: DiffViewerModel['reviews'];
-    setCollapsedIds: DiffViewerModel['setCollapsedIds'];
+    setExpandedIds: DiffViewerModel['setExpandedIds'];
     setCopyStatus: DiffViewerModel['setCopyStatus'];
     setDraftReview: DiffViewerModel['setDraftReview'];
     setReviews: DiffViewerModel['setReviews'];
@@ -39,7 +39,7 @@ export function DiffViewer({
     parsed,
     response,
     reviews,
-    setCollapsedIds,
+    setExpandedIds,
     setCopyStatus,
     setDraftReview,
     setReviews,
@@ -162,7 +162,7 @@ export function DiffViewer({
                                 fileLinks={fileLinks}
                                 fileReviews={fileReviews}
                                 onToggle={() => {
-                                    setCollapsedIds((current) => {
+                                    setExpandedIds((current) => {
                                         const next = new Set(current);
                                         if (next.has(file.id)) {
                                             next.delete(file.id);

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
@@ -47,6 +48,7 @@ Options:
   --port <number>   Port to listen on (default: 5177)
   --host <host>     Host to bind (default: 127.0.0.1)
   --foreground      Keep the local server attached to this terminal
+  --no-open         Do not try to open a browser automatically
   --verbose         Print server/source details while running
   --dev             Use Vite dev server (for development only)
   -v, --version     Show version
@@ -64,6 +66,7 @@ function parseArgs(argv) {
     vcs: 'auto',
     dev: false,
     foreground: false,
+    noOpen: false,
     verbose: false,
   };
 
@@ -93,6 +96,8 @@ function parseArgs(argv) {
       args.vcs = 'jj';
     } else if (arg === '--foreground') {
       args.foreground = true;
+    } else if (arg === '--no-open') {
+      args.noOpen = true;
     } else if (arg === '--verbose') {
       args.verbose = true;
     } else if (arg === '--dev') {
@@ -218,6 +223,18 @@ function notifyParent(message) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Skip browser launch when the user opted out or when there is no graphical
+ * session to open a browser into (for example, a headless Linux server).
+ */
+function shouldOpenBrowser(args) {
+  if (args.noOpen) return false;
+  if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+    return false;
+  }
+  return true;
 }
 
 function openBrowser(url) {
@@ -489,6 +506,41 @@ async function runServer(args) {
     }
   });
 
+  app.post('/api/file-times', express.json({ limit: '5mb' }), async (req, res) => {
+    try {
+      if (target.source === 'github' || typeof target.getFileContents !== 'function') {
+        res.json({ times: {} });
+        return;
+      }
+
+      const repoRoot = resolve(target.repoRoot);
+      const repoRootPrefix = repoRoot.endsWith(sep) ? repoRoot : `${repoRoot}${sep}`;
+      const requestedPaths = Array.isArray(req.body?.paths) ? req.body.paths : [];
+      const times = new Map();
+      await Promise.all(requestedPaths.map(async (path) => {
+        if (typeof path !== 'string' || path.length === 0) {
+          return;
+        }
+        const absolutePath = resolve(repoRoot, path);
+        if (!absolutePath.startsWith(repoRootPrefix)) {
+          return;
+        }
+        try {
+          const info = await stat(absolutePath);
+          if (info.isFile()) {
+            times.set(path, info.mtimeMs);
+          }
+        } catch {
+          // Missing files (for example deleted ones) keep no timestamp, so the client falls back to patch order.
+        }
+      }));
+
+      res.json({ times: Object.fromEntries(times) });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   if (args.dev) {
     await attachViteDevMiddleware(app, args.verbose);
   } else {
@@ -520,7 +572,9 @@ async function runServer(args) {
     console.log(`Target: ${displayTarget}`);
   }
 
-  const opened = await openBrowser(url);
+  // Treat an intentionally skipped browser launch as handled so headless
+  // servers do not print a "could not open the browser" warning.
+  const opened = shouldOpenBrowser(args) ? await openBrowser(url) : true;
   if (backgroundServer) {
     notifyParent({ type: 'ready', url, opened });
   } else if (!opened) {

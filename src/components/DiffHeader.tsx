@@ -2,6 +2,7 @@ import { useRef, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { ProjectedFile } from '../diffProjection';
+import { formatFileAge } from '../format';
 import type { DraftReview, FileLinks, SavedReview } from '../types';
 import { useDismissablePopover } from '../useDismissablePopover';
 import { DraftReviewBox, SavedReviewAnnotation } from './ReviewAnnotations';
@@ -252,9 +253,28 @@ function ChangeIcon({ type }: { type: ProjectedFile['changeType'] }) {
 function FileMeta({ file }: { file: ProjectedFile }) {
     return (
         <span className="fileMeta">
-            <span>{file.changeType}</span>
+            <span className="fileChangeType" title={`Change type: ${file.changeType}`}>
+                <span className="fileChangeTypeFull" aria-hidden="true">{file.changeType}</span>
+                <span className="fileChangeTypeShort" aria-hidden="true">{shortChangeType(file.changeType)}</span>
+                <span className="srOnly">{file.changeType}</span>
+            </span>
+            {file.changedAt != null ? (
+                <span
+                    className="fileAge"
+                    title={`Edited ${new Date(file.changedAt).toLocaleString()}`}
+                >
+                    {formatFileAge(file.changedAt)}
+                </span>
+            ) : null}
             <span className="plus">+{file.additions}</span>
             <span className="minus">−{file.deletions}</span>
         </span>
     );
+}
+
+function shortChangeType(type: ProjectedFile['changeType']): string {
+    if (type === 'new') return 'n';
+    if (type === 'deleted') return 'd';
+    if (type === 'renamed') return 'r';
+    return 'm';
 }
